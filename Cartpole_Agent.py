@@ -4,41 +4,49 @@ import random
 import copy
 from collections import deque
 import cv2
-from rlnn import Grid_DQN
+from rlnn import CartPole_DQN
 import torch.nn as nn
 import torch.optim as optim
 
 
-class DQN_Agent:
+class CartPole_Agent:
     def __init__(self, env):
 
         self.env = env
-        self.observation_space = env.observation_space #should be (210, 160, 3)
-        self.action_space = env.action_space #Discrete(NOOP, FIRE, RIGHT, LEFT)
+        #obervation space:
+        #Box(-4.8 to 4.8,     -Inf to Inf,    -.418 to .418 (24 deg), -Inf to Inf)
+        #   (Cart Position,   Cart Velocity,  Pole Angle,             Pole Angular Velocity)
+        self.observation_space = env.observation_space
+        self.action_space = env.action_space #Discrete(Push Left, Push Right)
 
         self.replay_memory = list() # can't set capacity N to python list
-        self.N = 1024#16384    #this is completely arbitrary and probably will need to be adjusted
+        self.N = 8192#16384    #There appears to be a problem with catastrophic forgetting
         self.batch_size = 32 #may want to experiment with batch_size
 
-        self.COUNTER_MAX = 32
+        self.COUNTER_MAX = 16
         self.refresh_counter = self.COUNTER_MAX
 
+        self.current_state = torch.zeros(4,1)
 
-        self.Q = Grid_DQN()
+        #Q should be a neural network that predicts Q-value based on image
+        #Input is [Position, velocity, angle, angular velocity]
+        #Q has output layer of 2 for value of (LEFT, RIGHT)
+        #We can select max of actions
+        self.Q = CartPole_DQN()
+        #self.load('Breakout-v0')
         
         self.frozen_Q = copy.deepcopy(self.Q)
         self.frozen_Q.eval()
 
         #epsilon used for e-greedy policy
-        self.epsilon = 1.0
-        #alpha for learning rate
-        self.alpha = .01 #we need to test this
+        self.epsilon = 1
+        #alhpa for learning rate
+        self.alpha = .001 #we need to test this
         #gamma for discount factor
-        self.gamma = .8
+        self.gamma = .7
 
         #still prefer adamw but sgd since copying paper
-        #self.optimizer = optim.SGD(self.Q.parameters(), lr = self.alpha, weight_decay=0.01)
-        self.optimizer = optim.SGD(self.Q.parameters(), lr = self.alpha)
+        self.optimizer = optim.SGD(self.Q.parameters(), lr = self.alpha)#, weight_decay=0.01)
         self.criterion = nn.MSELoss()
         
         self.previous_state = None
@@ -52,28 +60,43 @@ class DQN_Agent:
         torch.save(self.Q.state_dict(), './{}-weights.pth'.format(filename))
 
     def step(self, observation):
+        
+        #Observation is numpy.ndarray
+        observation = torch.from_numpy(observation)
 
         explore_or_exploit = random.random()
-
-        observation = torch.tensor(observation, dtype=torch.float32)
 
         action = None
 
         if explore_or_exploit < self.epsilon:
             action = np.random.choice(self.action_space.n)
         else:
+            self.current_state = observation
+            #I don't want to save the values of every iteration, but I'm pretty sure that
+            #rerunning the DQN.forward() will add to the DAG of Functions.
+            #I THINK that torch.no_grad() context manager will ensure that 
+            # there's no "double dipping" of gradient computations
             with torch.no_grad():
                 action = torch.argmax(self.Q(observation))
+                action = action.int().item()
         self.previous_state = observation
         self.previous_action = action
         return action
 
     def observe(self, observation, reward, done):
-        observation = torch.tensor(observation)
+        observation = torch.from_numpy(observation)
+
         reward = torch.tensor(reward)
-        self.replay_memory.append((self.previous_state, self.previous_action, reward, observation, done))
-        self.replay_memory = self.replay_memory[-self.N:] #deletes anything over N moves old
-        self.replay()
+
+        self.current_state = observation.float()
+
+        self.replay_memory.append((self.previous_state, self.previous_action, reward, self.current_state, done))
+        #self.replay_memory = self.replay_memory[-self.N:] #deletes anything over N moves old
+        # Instead of deleting the oldest I will save the first 1/16
+        #This is a test to prevent catastrophic forgetting
+        if len(self.replay_memory) > self.N:
+            del self.replay_memory[int(self.N/8)]
+        #self.replay(done)
 
     def replay(self):
         if len(self.replay_memory) < self.batch_size:
@@ -87,34 +110,18 @@ class DQN_Agent:
             reward = sample[2]
             next_state = sample[3]
             done = sample[4]
-            
-
-            state = state.float()
-            next_state = next_state.float()
 
             #I'm going to clear memory each new episode,
             #so I don't need to worry about sample being done in previous episode
             #Checking for finished episode and is most recent action in memory
             if done == True:
-                if(type(reward) != type(torch.zeros(1))):
-                    target = torch.tensor(reward) # I think this was causing an error before tensor
-                else:
-                    target = reward
+                target = reward
             else:
                 target = reward + self.gamma * torch.max(self.frozen_Q(next_state))
             
             output = self.Q(state)
-            output = output[action]
+            output = output[action] #get the value of action taken
 
-            #debugging, but I think i fixed it
-            if type(output) != type(torch.zeros(1)):
-                print(type(output))
-                print('output: {}'.format(output))
-                output = torch.tensor(output)
-            if type(target) != type(torch.zeros(1)):
-                print(type(target))
-                print('target: {}'.format(target))
-                target = torch.tensor(target)
             loss = self.criterion(output, target) #loss will be based on action value and target
             self.optimizer.zero_grad()
             loss.backward()
@@ -128,5 +135,7 @@ class DQN_Agent:
                 self.frozen_Q = copy.deepcopy(self.Q)
 
     def reset(self):
+        self.replay_memory.clear()
         self.refresh_counter = self.COUNTER_MAX
         self.frozen_Q = copy.deepcopy(self.Q)
+        self.current_state = torch.zeros(4,1)

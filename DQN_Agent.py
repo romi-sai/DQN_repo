@@ -44,11 +44,11 @@ class DQN_Agent:
         self.frozen_Q.eval()
 
         #epsilon used for e-greedy policy
-        self.epsilon = .9
+        self.epsilon = 1
         #alhpa for learning rate
         self.alpha = .01 #we need to test this
         #gamma for discount factor
-        self.gamma = .99
+        self.gamma = .8
 
         #still prefer adamw but sgd since copying paper
         self.optimizer = optim.SGD(self.Q.parameters(), lr = self.alpha, weight_decay=0.01)
@@ -111,11 +111,11 @@ class DQN_Agent:
         self.current_state.popleft()
         self.current_state.append(observation)
         next_phi = torch.unsqueeze(torch.stack((self.current_state[0], self.current_state[1], self.current_state[2], self.current_state[3]), dim=0), dim=0)
-        self.replay_memory.append((current_phi, self.previous_action, reward, next_phi))
+        self.replay_memory.append((current_phi, self.previous_action, reward, next_phi, done))
         self.replay_memory = self.replay_memory[-self.N:] #deletes anything over N moves old
-        self.replay(done)
+        #self.replay(done)
 
-    def replay(self, done):
+    def replay(self):
         if len(self.replay_memory) < self.batch_size:
             return
 
@@ -126,6 +126,7 @@ class DQN_Agent:
             action = sample[1]
             reward = sample[2]
             next_phi = sample[3]
+            done = sample[4]
 
             phi = phi.float()
             next_phi = next_phi.float()
@@ -145,14 +146,14 @@ class DQN_Agent:
             #print('output: {}'.format(output))
             #print('target: {}'.format(type(target)))
             #print('target: {}'.format(target))
-            if type(output) != type(torch.zeros(1)):
-                print(type(output))
-                print('output: {}'.format(output))
-                output = torch.tensor(output)
-            if type(target) != type(torch.zeros(1)):
-                print(type(target))
-                print('target: {}'.format(target))
-                target = torch.tensor(target)
+            # if type(output) != type(torch.zeros(1)):
+            #     print(type(output))
+            #     print('output: {}'.format(output))
+            #     output = torch.tensor(output)
+            # if type(target) != type(torch.zeros(1)):
+            #     print(type(target))
+            #     print('target: {}'.format(target))
+            #     target = torch.tensor(target)
             loss = self.criterion(output, target) #loss will be based on action value and target
             self.optimizer.zero_grad()
             loss.backward()

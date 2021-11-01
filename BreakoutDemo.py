@@ -1,5 +1,6 @@
 import gym
 import ale_py
+from DQN_Agent import DQN_Agent
 
 #print('gym:', gym.__version__)
 #print('ale_py:', ale_py.__version__)
@@ -21,15 +22,17 @@ pprint(vars(env)):
 env.unwrapped.get_action_meanings()
 env.action_space
 env.observation_space.shape
-
 '''
 
 def demo():
-    env = gym.make('Breakout- v0')
+    env = gym.make('Breakout-v0')
+    agent = DQN_Agent(env)
     for i_episode in range(5):
         observation = env.reset()
         for t in range(1000):
-            action = env.action_space.sample()
+            env.render()
+            #action = env.action_space.sample()
+            action = agent.step(observation)
             observation, reward, done, info = env.step(action)
             if done:
                 break
