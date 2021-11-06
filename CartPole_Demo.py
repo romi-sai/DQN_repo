@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
-EPISODES = 6
+EPISODES = 200
 MAX_TIMESTEPS = 1000
 
 env = gym.make('CartPole-v1')
@@ -28,8 +28,8 @@ for i_episode in range(EPISODES):
     observation = env.reset()
     for t in range(MAX_TIMESTEPS):
         #env.render()
-        if i_episode > EPISODES-10:
-            env.render()
+        # if i_episode > EPISODES-10:
+        #     env.render()
         #action = env.action_space.sample()
         action = agent.step(observation)
         observation, reward, done, info = env.step(action)
